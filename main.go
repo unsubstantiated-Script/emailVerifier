@@ -1,51 +1,66 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"github.com/joho/godotenv"
-	"github.com/slack-go/slack"
+	"log"
+	"net"
 	"os"
+	"strings"
 )
 
 func main() {
-	slackBotToken := goDotEnvVariable("SLACK_BOT_TOKEN")
-	channelID := goDotEnvVariable("CHANNEL_ID")
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Print("domain, hasMx, hasSPF, sprRecord, hasDMARC, dmarcRecord \n")
 
-	api := slack.New(slackBotToken)
-
-	fileInfo, err := os.Stat("Testing_Jazz.pdf")
-
-	if err != nil {
-		fmt.Printf("Error parsing file: %s\n", err)
-		return
+	for scanner.Scan() {
+		checkDomain(scanner.Text())
 	}
 
-	//Flattened this out of an array as prior technique didn't factor in new method and its params.
-	params := slack.UploadFileV2Parameters{
-		Channel:  channelID,
-		File:     fileInfo.Name(),
-		Filename: fileInfo.Name(),
-		FileSize: int(fileInfo.Size()),
+	if err := scanner.Err(); err != nil {
+		log.Fatalf("Error: could not read from input: %v\n", err)
 	}
-
-	file, err := api.UploadFileV2(params)
-
-	if err != nil {
-		fmt.Printf("Error uploading file: %s\n", err)
-		return
-	}
-
-	fmt.Printf("File uploaded:%s\n", file)
-
 }
 
-func goDotEnvVariable(key string) string {
-	//load .env
-	err := godotenv.Load(".env")
+func checkDomain(domain string) {
+	var hasMx, hasSPF, hasDMARC bool
+	var spfRecord, dmarcRecord string
+
+	mxRecords, err := net.LookupMX(domain)
 
 	if err != nil {
-		fmt.Println("Error loading .env file")
+		log.Fatalf("Error: %v\n", err)
 	}
 
-	return os.Getenv(key)
+	if len(mxRecords) > 0 {
+		hasMx = true
+	}
+
+	txtRecords, err := net.LookupTXT(domain)
+	if err != nil {
+		log.Fatalf("Error: %v\n", err)
+	}
+
+	for _, record := range txtRecords {
+		if strings.HasPrefix(record, "v=spf1") {
+			hasSPF = true
+			spfRecord = record
+			break
+		}
+	}
+
+	dmarcRecords, err := net.LookupTXT("_dmarc." + domain)
+	if err != nil {
+		log.Fatalf("Error: %v\n", err)
+	}
+
+	for _, record := range dmarcRecords {
+		if strings.HasPrefix(record, "v=DMARC1") {
+			hasDMARC = true
+			dmarcRecord = record
+			break
+		}
+	}
+
+	fmt.Printf("%v %v %v %v %v %v\n", domain, hasMx, hasSPF, spfRecord, hasDMARC, dmarcRecord)
 }
